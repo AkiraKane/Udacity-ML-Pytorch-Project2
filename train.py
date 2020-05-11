@@ -20,9 +20,9 @@ def arg_parse():
     parser = argparse.ArgumentParser()
     
     parser.add_argument("--data_dir", type=str, default = "flowers/")
-    parser.add_argument('--device',default = 'cuda',help = 'choose the device GPU',type = str)
+    parser.add_argument('--gpu',default = 'cuda', choices=["cuda", "cpu"], help = 'choose the device GPU',type = str)
     parser.add_argument('--save_dir',default = 'checkpoint3.pth',help = 'location to save',type =str)
-    parser.add_argument('--arch',default = 'vgg16',type = str )
+    parser.add_argument('--arch',default = 'vgg16', choices=['vgg16', 'alexnet', 'densenet161'], type = str )
     parser.add_argument('--learning_rate',default = '0.001',help = 'learning rate with default value 0.001',type = float)
     parser.add_argument('--epochs',default = 4,help = 'list the number of epochs',type = int)
     parser.add_argument('--path_to_image', type = str, default = '47/image_04966.jpg',help = 'image path to test')
@@ -66,25 +66,31 @@ def main():
     with open('cat_to_name.json', 'r') as f:
         cat_to_name = json.load(f)
     
-     # Device CPU or gpu
-    device = args.device
+    # Device CPU or gpu
+    args.gpu = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = args.gpu
+    
+    # Pretrained model
+    model = getattr(models, args.arch)(pretrained=True)
     
     # architectures list
-    if (args.arch == 'vgg16' ): 
-        model = models.vgg16(pretrained=True)
-    else:
-        print("please enter vgg16 ")
+    if args.arch == 'vgg16': 
+        input_dim = 25088
+    elif args.arch == 'alexnet':
+        input_dim = model.classifier[1].in_features
+    elif args.arch == 'densenet161':
+        input_dim = model.classifier.in_features
+        
     
     for param in model.parameters():
         param.requires_grad = False    
             
     # define classifier
     classifier = nn.Sequential(OrderedDict([
-        ('dense1',nn.Linear(25088,4096)),
+        ('dense1',nn.Linear(input_dim,args.hidden_units)),
         ('relu1',nn.ReLU()),
-        ('dense2',nn.Linear(4096,args.hidden_units)),
-        ('relu2',nn.ReLU()),
-        ('dense3',nn.Linear(args.hidden_units,102)),  
+        ('dropout1', nn.Dropout(p=0.2)),
+        ('dense2',nn.Linear(args.hidden_units, 102)),
         ('output',nn.LogSoftmax(dim=1))
         ]))
     
@@ -166,9 +172,9 @@ def main():
     # Save the checkpoint
     model.class_to_idx = train_data.class_to_idx
 
-    checkpoint = {'input_size': 25088,
+    checkpoint = {'input_size': input_dim,
                   'output_size': 102,
-                  'model': model,
+                  'model': getattr(models, args.arch)(pretrained=True),
                   'classifier': model.classifier,
                   'state_dict': model.state_dict(),
                   'optimizer': optimizer,

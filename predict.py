@@ -13,7 +13,6 @@ from collections import OrderedDict
 
 from PIL import Image
 
-torch.manual_seed(47)
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------
 def arg_parse():
@@ -23,7 +22,7 @@ def arg_parse():
     parser.add_argument("--checkpoint", type=str, help="Saved trained model checkpoint")
     parser.add_argument("--top_k", type=int, default=4, help="Top K most likely classes")
     parser.add_argument("--category_names", type=str, default="cat_to_name.json", help="JSPN object to map category label to name")
-    parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Device to train on")
+    parser.add_argument("--gpu", type=str, default="cuda", choices=["cuda", "cpu"], help="Device to train on")
     
     return parser.parse_args()
 
@@ -47,11 +46,6 @@ def load_checkpoint(filepath):
     return model
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------
-test_transform = transforms.Compose([transforms.Resize(224),
-                                      transforms.CenterCrop(224),
-                                     transforms.ToTensor(),
-                                     transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                              std=[0.229, 0.224, 0.225])])
 
 def process_image(image):
     ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
@@ -59,9 +53,34 @@ def process_image(image):
     '''
     
     # Process a PIL image for use in a PyTorch model
-    converted_image = Image.open(image).convert("RGB")
-    converted_image = test_transform(converted_image)
-    return converted_image
+    y_to_x_ratio = image.size[1] / image.size[0]
+    trans = transforms.ToTensor()
+    x = 256
+    y = int(y_to_x_ratio * x)
+    image = image.resize((x, y))
+
+    #cropping from center
+    center_width = image.size[0] / 2
+    center_height = image.size[1] / 2
+
+    cropped_image = image.crop(
+        (
+        center_width - 112,
+        center_height - 112,
+        center_width + 112,
+        center_height + 112
+        )
+                        )
+    #Normalize image
+    np_image = np.array(cropped_image)
+    np_image = np.array(np_image)/255.0
+
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+
+    image = (np_image - mean) / std
+    image = image.transpose((2, 0, 1))
+    return torch.from_numpy(image)
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------
 def predict(device, image_path, model, topk):
@@ -90,8 +109,8 @@ def predict(device, image_path, model, topk):
         top_class = np.array(top_class[0])
     
     # Convert indices to actual category names
-    index_to_class = {val: key for key, val in model.class_to_idx.items()}
-    top_class = [index_to_class[idx] for idx in top_class]
+#     index_to_class = {val: key for key, val in model.class_to_idx.items()}
+#     top_class = [index_to_class[idx] for idx in top_class]
     
     return top_ps, top_class
 
@@ -106,10 +125,17 @@ def main():
     # Load the checkpoint
     model = load_checkpoint(args.checkpoint)
     
-    # Class prediction
-    device = args.device
+    # Check if gpu is available
+    args.gpu = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = args.gpu
     image_path = args.img_path
     top_k = args.top_k
+    
+    # user spicify the JSON file
+    category_names = args_values.category_names
+    
+    with open(category_names, 'r') as f:
+        cat_to_name = json.load(f)
     
     probs, classes = predict(device, image_path, model, top_k)
     names = [cat_to_name[str(idx)] for idx in classes]
